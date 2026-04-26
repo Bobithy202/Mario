@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Procedural Mario-Like</title>
+<style>
+  body {
+    margin: 0;
+    background: #87CEEB;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+  }
+  canvas {
+    border: 3px solid #000;
+    background: #87CEEB;
+  }
+</style>
+</head>
+<body>
+<canvas id="game" width="960" height="540"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const keys = {};
+document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+document.addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
+
+const GRAVITY = 0.6;
+const FRICTION = 0.8;
+
+const world = {
+  scrollX: 0,
+  chunks: [],
+  enemies: [],
+  blocks: [],
+  pipes: [],
+  lastChunkEnd: 0,
+  chunkWidth: 400
+};
+
+const player = {
+  x: 100,
+  y: 0,
+  w: 32,
+  h: 48,
+  vx: 0,
+  vy: 0,
+  speed: 3,
+  fastSpeed: 5,
+  onGround: false
+};
+
+// Utility
+function rectsCollide(a, b) {
+  return (
+    a.x < b.x + b.w &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.h &&
+    a.y + a.h > b.y
+  );
+}
+
+// Create Mario-like chunk
+function createChunk(startX) {
+  const groundHeight = 80;
+
+  // 1. Ground
+  world.chunks.push({
+    x: startX,
+    y: canvas.height - groundHeight,
+    w: world.chunkWidth,
+    h: groundHeight
+  });
+
+  // 2. Random pipe
+  if (Math.random() < 0.3) {
+    world.pipes.push({
+      x: startX + 100 + Math.random() * 200,
+      y: canvas.height - groundHeight - 60,
+      w: 60,
+      h: 60
+    });
+  }
+
+  // 3. Random question blocks
+  if (Math.random() < 0.5) {
+    world.blocks.push({
+      x: startX + 80 + Math.random() * 250,
+      y: canvas.height - groundHeight - 150,
+      w: 40,
+      h: 40
+    });
+  }
+
+  // 4. Goomba-like enemy
+  if (Math.random() < 0.4) {
+    const ex = startX + 100 + Math.random() * 200;
+    world.enemies.push({
+      x: ex,
+      y: canvas.height - groundHeight - 32,
+      w: 32,
+      h: 32,
+      vx: (Math.random() < 0.5 ? -1 : 1) * 1,
+      range: 50,
+      baseX: ex
+    });
+  }
+
+  world.lastChunkEnd = startX + world.chunkWidth;
+}
+
+// Preload chunks
+for (let i = 0; i < 5; i++) {
+  createChunk(i * world.chunkWidth);
+}
+
+function updatePlayer() {
+  let moveRight = keys["w"] || keys["arrowright"];
+  let moveLeft  = keys["s"] || keys["arrowleft"];
+  let fast      = keys["shift"];
+
+  const targetSpeed = fast ? player.fastSpeed : player.speed;
+
+  if (moveRight) player.vx = targetSpeed;
+  else if (moveLeft) player.vx = -targetSpeed;
+  else player.vx *= FRICTION;
+
+  if ((keys[" "] || keys["space"]) && player.onGround) {
+    player.vy = -12;
+    player.onGround = false;
+  }
+
+  player.vy += GRAVITY;
+
+  player.x += player.vx;
+  player.y += player.vy;
+
+  const centerX = canvas.width / 2;
+  if (player.x - world.scrollX > centerX) {
+    world.scrollX = player.x - centerX;
+  }
+
+  while (world.lastChunkEnd < world.scrollX + canvas.width + world.chunkWidth) {
+    createChunk(world.lastChunkEnd);
+  }
+
+  player.onGround = false;
+  const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+
+  // Ground + pipes + blocks collision
+  const solids = [...world.chunks, ...world.pipes, ...world.blocks];
+
+  for (const s of solids) {
+    const sBox = { x: s.x, y: s.y, w: s.w, h: s.h };
+
+    if (rectsCollide(pBox, sBox)) {
+      if (player.vy > 0 && player.y + player.h <= s.y + player.vy + 5) {
+        player.y = s.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+      }
+    }
+  }
+
+  if (player.y > canvas.height + 200) {
+    player.x = world.scrollX + 100;
+    player.y = 0;
+    player.vx = 0;
+    player.vy = 0;
+  }
+}
+
+function updateEnemies() {
+  for (const e of world.enemies) {
+    e.x += e.vx;
+    if (Math.abs(e.x - e.baseX) > e.range) {
+      e.vx *= -1;
+    }
+
+    const eBox = { x: e.x, y: e.y, w: e.w, h: e.h };
+    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+
+    if (rectsCollide(pBox, eBox)) {
+      player.x = world.scrollX + 100;
+      player.y = 0;
+      player.vx = 0;
+      player.vy = 0;
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const offsetX = world.scrollX;
+
+  // Ground
+  ctx.fillStyle = "#8B4513";
+  for (const g of world.chunks) {
+    ctx.fillRect(g.x - offsetX, g.y, g.w, g.h);
+  }
+
+  // Pipes
+  ctx.fillStyle = "#00AA00";
+  for (const p of world.pipes) {
+    ctx.fillRect(p.x - offsetX, p.y, p.w, p.h);
+  }
+
+  // Question blocks
+  ctx.fillStyle = "#FFD700";
+  for (const b of world.blocks) {
+    ctx.fillRect(b.x - offsetX, b.y, b.w, b.h);
+  }
+
+  // Enemies
+  ctx.fillStyle = "#AA0000";
+  for (const e of world.enemies) {
+    ctx.fillRect(e.x - offsetX, e.y, e.w, e.h);
+  }
+
+  // Player
+  ctx.fillStyle = "#FFFF00";
+  ctx.fillRect(player.x - offsetX, player.y, player.w, player.h);
+}
+
+function loop() {
+  updatePlayer();
+  updateEnemies();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
