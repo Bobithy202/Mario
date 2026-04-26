@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
 <title>Procedural Mario-Like</title>
@@ -22,26 +22,47 @@
 <canvas id="game" width="960" height="540"></canvas>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+// ----------------------
+// IMAGE LOADING
+// ----------------------
+const imgGround = new Image(); imgGround.src = "GND.png";
+const imgPipe   = new Image(); imgPipe.src = "OBJ1.png";
+const imgBrick  = new Image(); imgBrick.src = "OBJB.png"; // NEW
+const imgPlayer = new Image(); imgPlayer.src = "CHAR.png";
+const imgEnemy  = new Image(); imgEnemy.src = "ENMY.png";
 
+// ----------------------
+// INPUT
+// ----------------------
 const keys = {};
 document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
 document.addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
 
+// ----------------------
+// CONSTANTS
+// ----------------------
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
 const GRAVITY = 0.6;
 const FRICTION = 0.8;
 
+// ----------------------
+// WORLD DATA
+// ----------------------
 const world = {
   scrollX: 0,
   chunks: [],
-  enemies: [],
-  blocks: [],
   pipes: [],
+  bricks: [],   // NEW
+  enemies: [],
   lastChunkEnd: 0,
   chunkWidth: 400
 };
 
+// ----------------------
+// PLAYER
+// ----------------------
 const player = {
   x: 100,
   y: 0,
@@ -54,7 +75,18 @@ const player = {
   onGround: false
 };
 
-// Utility
+// ----------------------
+// HITBOX UTILITY
+// ----------------------
+function hitbox(obj) {
+  return {
+    x: obj.x - 1,
+    y: obj.y - 1,
+    w: obj.w + 2,
+    h: obj.h + 2
+  };
+}
+
 function rectsCollide(a, b) {
   return (
     a.x < b.x + b.w &&
@@ -64,11 +96,13 @@ function rectsCollide(a, b) {
   );
 }
 
-// Create Mario-like chunk
+// ----------------------
+// CHUNK GENERATION
+// ----------------------
 function createChunk(startX) {
   const groundHeight = 80;
 
-  // 1. Ground
+  // Ground
   world.chunks.push({
     x: startX,
     y: canvas.height - groundHeight,
@@ -76,7 +110,7 @@ function createChunk(startX) {
     h: groundHeight
   });
 
-  // 2. Random pipe
+  // Pipe
   if (Math.random() < 0.3) {
     world.pipes.push({
       x: startX + 100 + Math.random() * 200,
@@ -86,17 +120,18 @@ function createChunk(startX) {
     });
   }
 
-  // 3. Random question blocks
+  // Breakable brick
   if (Math.random() < 0.5) {
-    world.blocks.push({
+    world.bricks.push({
       x: startX + 80 + Math.random() * 250,
       y: canvas.height - groundHeight - 150,
       w: 40,
-      h: 40
+      h: 40,
+      broken: false
     });
   }
 
-  // 4. Goomba-like enemy
+  // Enemy
   if (Math.random() < 0.4) {
     const ex = startX + 100 + Math.random() * 200;
     world.enemies.push({
@@ -106,7 +141,8 @@ function createChunk(startX) {
       h: 32,
       vx: (Math.random() < 0.5 ? -1 : 1) * 1,
       range: 50,
-      baseX: ex
+      baseX: ex,
+      dead: false
     });
   }
 
@@ -118,6 +154,9 @@ for (let i = 0; i < 5; i++) {
   createChunk(i * world.chunkWidth);
 }
 
+// ----------------------
+// PLAYER UPDATE
+// ----------------------
 function updatePlayer() {
   let moveRight = keys["w"] || keys["arrowright"];
   let moveLeft  = keys["s"] || keys["arrowleft"];
@@ -139,25 +178,28 @@ function updatePlayer() {
   player.x += player.vx;
   player.y += player.vy;
 
+  // Camera follow
   const centerX = canvas.width / 2;
   if (player.x - world.scrollX > centerX) {
     world.scrollX = player.x - centerX;
   }
 
+  // Generate new chunks
   while (world.lastChunkEnd < world.scrollX + canvas.width + world.chunkWidth) {
     createChunk(world.lastChunkEnd);
   }
 
+  // Collision
   player.onGround = false;
-  const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+  const pHit = hitbox(player);
 
-  // Ground + pipes + blocks collision
-  const solids = [...world.chunks, ...world.pipes, ...world.blocks];
+  const solids = [...world.chunks, ...world.pipes];
 
+  // Ground + pipes
   for (const s of solids) {
-    const sBox = { x: s.x, y: s.y, w: s.w, h: s.h };
+    const sHit = hitbox(s);
 
-    if (rectsCollide(pBox, sBox)) {
+    if (rectsCollide(pHit, sHit)) {
       if (player.vy > 0 && player.y + player.h <= s.y + player.vy + 5) {
         player.y = s.y - player.h;
         player.vy = 0;
@@ -166,6 +208,28 @@ function updatePlayer() {
     }
   }
 
+  // Breakable bricks
+  for (const b of world.bricks) {
+    if (b.broken) continue;
+
+    const bHit = hitbox(b);
+
+    if (rectsCollide(pHit, bHit)) {
+      // Hit from below
+      if (player.vy < 0 && player.y >= b.y + b.h - 10) {
+        b.broken = true;
+        player.vy = 2; // slight bounce down
+      }
+      // Land on top
+      else if (player.vy > 0 && player.y + player.h <= b.y + player.vy + 5) {
+        player.y = b.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+      }
+    }
+  }
+
+  // Death reset
   if (player.y > canvas.height + 200) {
     player.x = world.scrollX + 100;
     player.y = 0;
@@ -174,17 +238,38 @@ function updatePlayer() {
   }
 }
 
+// ----------------------
+// ENEMY UPDATE
+// ----------------------
 function updateEnemies() {
   for (const e of world.enemies) {
+    if (e.dead) continue;
+
     e.x += e.vx;
     if (Math.abs(e.x - e.baseX) > e.range) {
       e.vx *= -1;
     }
 
-    const eBox = { x: e.x, y: e.y, w: e.w, h: e.h };
-    const pBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+    const eHit = hitbox(e);
+    const pHit = hitbox(player);
 
-    if (rectsCollide(pBox, eBox)) {
+    // Stomp hitbox
+    const stomp = {
+      x: e.x,
+      y: e.y - 8,
+      w: e.w,
+      h: 8
+    };
+
+    // Player stomps enemy
+    if (rectsCollide(pHit, stomp) && player.vy > 0) {
+      e.dead = true;
+      player.vy = -10;
+      continue;
+    }
+
+    // Enemy kills player
+    if (rectsCollide(pHit, eHit)) {
       player.x = world.scrollX + 100;
       player.y = 0;
       player.vx = 0;
@@ -193,40 +278,45 @@ function updateEnemies() {
   }
 }
 
+// ----------------------
+// DRAW
+// ----------------------
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const offsetX = world.scrollX;
 
   // Ground
-  ctx.fillStyle = "#8B4513";
   for (const g of world.chunks) {
-    ctx.fillRect(g.x - offsetX, g.y, g.w, g.h);
+    ctx.drawImage(imgGround, g.x - offsetX, g.y, g.w, g.h);
   }
 
   // Pipes
-  ctx.fillStyle = "#00AA00";
   for (const p of world.pipes) {
-    ctx.fillRect(p.x - offsetX, p.y, p.w, p.h);
+    ctx.drawImage(imgPipe, p.x - offsetX, p.y, p.w, p.h);
   }
 
-  // Question blocks
-  ctx.fillStyle = "#FFD700";
-  for (const b of world.blocks) {
-    ctx.fillRect(b.x - offsetX, b.y, b.w, b.h);
+  // Bricks
+  for (const b of world.bricks) {
+    if (!b.broken) {
+      ctx.drawImage(imgBrick, b.x - offsetX, b.y, b.w, b.h);
+    }
   }
 
   // Enemies
-  ctx.fillStyle = "#AA0000";
   for (const e of world.enemies) {
-    ctx.fillRect(e.x - offsetX, e.y, e.w, e.h);
+    if (!e.dead) {
+      ctx.drawImage(imgEnemy, e.x - offsetX, e.y, e.w, e.h);
+    }
   }
 
   // Player
-  ctx.fillStyle = "#FFFF00";
-  ctx.fillRect(player.x - offsetX, player.y, player.w, player.h);
+  ctx.drawImage(imgPlayer, player.x - offsetX, player.y, player.w, player.h);
 }
 
+// ----------------------
+// GAME LOOP
+// ----------------------
 function loop() {
   updatePlayer();
   updateEnemies();
